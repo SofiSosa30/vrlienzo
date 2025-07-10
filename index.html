@@ -293,6 +293,10 @@
         // Referencias UI
         let crosshair, info, vrInstructions, vrOverlay, uiContainer;
         
+        // NUEVO: Crosshair 3D para VR
+        let crosshair3D = null;
+        let gazeProgress3D = null;
+        
         // SOLO ESTAS VARIABLES NUEVAS PARA ARREGLAR GIROSCOPIO
         let gyroCalibrated = false;
         let initialOrientation = { alpha: 0, beta: 0, gamma: 0 };
@@ -303,24 +307,22 @@
                 image: 'renderFinal.webp',
                 name: 'Escena 1',
                 teleports: [
-                    { position: [100, 0, 100], target: 1 },
-                    { position: [-100, 0, 100], target: 2 }
+                    { position: [-200, 0, 0], target: 1 },
+                    { position: [200, 0, -25], target: 2 }
                 ]
             },
             {
                 image: 'renderFinal1.webp',
                 name: 'Escena 2',
                 teleports: [
-                    { position: [0, 0, 150], target: 0 },
-                    { position: [120, 0, -50], target: 2 }
+                    { position: [0, 0, 150], target: 0 }
                 ]
             },
             {
                 image: 'renderFinal2.webp',
                 name: 'Escena 3',
                 teleports: [
-                    { position: [-80, 0, 80], target: 0 },
-                    { position: [80, 0, -80], target: 1 }
+                    { position: [-80, 0, 80], target: 0 }
                 ]
             }
         ];
@@ -360,8 +362,9 @@
             renderer.toneMappingExposure = 1.2;
             document.getElementById('container').appendChild(renderer.domElement);
             
-            // Crear esfera para la imagen 360
-            const geometry = new THREE.SphereGeometry(500, 60, 40);
+            // Crear esfera para la imagen 360 - OPTIMIZADA PARA MÓVILES
+            const segments = isMobile ? 32 : 60; // Menos geometría en móviles
+            const geometry = new THREE.SphereGeometry(500, segments, segments/2);
             geometry.scale(-1, -1, 1);
             
             const material = new THREE.MeshBasicMaterial({ 
@@ -396,11 +399,70 @@
             // Crear raycaster para detección de mirada
             raycaster = new THREE.Raycaster();
             
+            // NUEVO: Crear crosshair 3D para VR
+            createCrosshair3D();
+            
             // Cargar primera escena
             loadScene(currentSceneIndex);
             
             // Iniciar animación
             animate();
+        }
+        
+        // NUEVO: Crear crosshair 3D visible en VR (más pequeño)
+        function createCrosshair3D() {
+            // Crear geometría de círculo MÁS PEQUEÑA
+            const crosshairGeometry = new THREE.RingGeometry(0.15, 0.25, 16);
+            const crosshairMaterial = new THREE.MeshBasicMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.8,
+                side: THREE.DoubleSide
+            });
+            
+            crosshair3D = new THREE.Mesh(crosshairGeometry, crosshairMaterial);
+            crosshair3D.position.set(0, 0, -10); // Posicionado frente a la cámara
+            crosshair3D.visible = false; // Inicialmente invisible
+            
+            scene.add(crosshair3D);
+            
+            // NUEVO: Crear indicador de progreso 3D para VR
+            const progressGeometry = new THREE.RingGeometry(0.3, 0.4, 32);
+            const progressMaterial = new THREE.MeshBasicMaterial({
+                color: 0x00ff00,
+                transparent: true,
+                opacity: 0.8,
+                side: THREE.DoubleSide
+            });
+            
+            gazeProgress3D = new THREE.Mesh(progressGeometry, progressMaterial);
+            gazeProgress3D.position.set(0, 0, -10);
+            gazeProgress3D.visible = false;
+            
+            scene.add(gazeProgress3D);
+        }
+        
+        // NUEVO: Actualizar posición del crosshair 3D y progreso
+        function updateCrosshair3D() {
+            if (vrMode) {
+                const direction = new THREE.Vector3(0, 0, -10);
+                direction.applyQuaternion(camera.quaternion);
+                
+                if (crosshair3D) {
+                    crosshair3D.position.copy(direction);
+                    crosshair3D.lookAt(camera.position);
+                }
+                
+                if (gazeProgress3D) {
+                    gazeProgress3D.position.copy(direction);
+                    gazeProgress3D.lookAt(camera.position);
+                    
+                    // Animar rotación del progreso
+                    if (gazeProgress3D.visible) {
+                        gazeProgress3D.rotation.z += 0.05;
+                    }
+                }
+            }
         }
         
         function setupVRButton() {
@@ -428,11 +490,25 @@
             renderer.setScissorTest(true);
             initialAlpha = null;
             
+            // NUEVO: Activar pantalla completa como F11
+            enterFullscreen();
+            
             // Activar clases VR en elementos UI
             crosshair.classList.add('vr-mode');
             gazeProgress.classList.add('vr-mode');
-            info.classList.add('vr-mode');
-            vrInstructions.classList.add('vr-mode');
+            
+            // NUEVO: Mostrar crosshair 3D y ocultar el HTML
+            if (crosshair3D) {
+                crosshair3D.visible = true;
+            }
+            crosshair.style.display = 'none'; // Ocultar crosshair HTML
+            gazeProgress.style.display = 'none'; // Ocultar progreso HTML
+            
+            // QUITADO: No mostrar info ni instrucciones en VR para no interferir
+            info.style.display = 'none';
+            vrInstructions.style.display = 'none';
+            vrButton.style.display = 'none'; // Ocultar botón para no interferir
+            
             vrOverlay.classList.add('active');
             
             if (screen.orientation && screen.orientation.lock) {
@@ -440,8 +516,6 @@
                     console.log('No se pudo bloquear la orientación');
                 });
             }
-            
-            document.getElementById('info').textContent = 'Modo VR - Mira los cubos verdes para teleportarte';
             
             // Ocultar cursor del mouse
             document.body.style.cursor = 'none';
@@ -451,18 +525,33 @@
             renderer.setScissorTest(false);
             renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
             
+            // NUEVO: Salir de pantalla completa
+            exitFullscreen();
+            
             // Remover clases VR
             crosshair.classList.remove('vr-mode');
             gazeProgress.classList.remove('vr-mode');
-            info.classList.remove('vr-mode');
-            vrInstructions.classList.remove('vr-mode');
+            
+            // NUEVO: Ocultar crosshair 3D y mostrar el HTML
+            if (crosshair3D) {
+                crosshair3D.visible = false;
+            }
+            if (gazeProgress3D) {
+                gazeProgress3D.visible = false;
+            }
+            crosshair.style.display = 'block'; // Mostrar crosshair HTML
+            gazeProgress.style.display = 'none'; // Restaurar estado inicial
+            
+            // RESTAURAR: Mostrar elementos UI normales
+            info.style.display = 'block';
+            vrInstructions.style.display = 'none'; // Las instrucciones solo en VR
+            vrButton.style.display = 'block';
+            
             vrOverlay.classList.remove('active');
             
             if (screen.orientation && screen.orientation.unlock) {
                 screen.orientation.unlock();
             }
-            
-            document.getElementById('info').textContent = 'Mira un cubo por 3 segundos para teleportarte';
             
             // Restaurar cursor del mouse
             document.body.style.cursor = 'default';
@@ -503,19 +592,64 @@
             });
         }
         
+        // NUEVO: Funciones para pantalla completa como F11
+        function enterFullscreen() {
+            const element = document.documentElement;
+            
+            if (element.requestFullscreen) {
+                element.requestFullscreen();
+            } else if (element.webkitRequestFullscreen) { // Safari
+                element.webkitRequestFullscreen();
+            } else if (element.mozRequestFullScreen) { // Firefox
+                element.mozRequestFullScreen();
+            } else if (element.msRequestFullscreen) { // IE/Edge
+                element.msRequestFullscreen();
+            }
+        }
+        
+        function exitFullscreen() {
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) { // Safari
+                document.webkitExitFullscreen();
+            } else if (document.mozCancelFullScreen) { // Firefox
+                document.mozCancelFullScreen();
+            } else if (document.msExitFullscreen) { // IE/Edge
+                document.msExitFullscreen();
+            }
+        }
+        
+        // NUEVO: Detectar cuando se sale de pantalla completa y desactivar VR
+        function onFullscreenChange() {
+            const isFullscreen = !!(document.fullscreenElement || 
+                                   document.webkitFullscreenElement || 
+                                   document.mozFullScreenElement || 
+                                   document.msFullscreenElement);
+            
+            if (!isFullscreen && vrMode) {
+                // Si salimos de pantalla completa, desactivar VR
+                toggleVRMode();
+            }
+        }
+        
         function loadScene(sceneIndex) {
             const sceneData = scenes[sceneIndex];
-            document.getElementById('info').textContent = `${sceneData.name} - Mira un cubo por 3 segundos para teleportarte`;
+            
+            // Solo actualizar texto si no estamos en VR
+            if (!vrMode) {
+                document.getElementById('info').textContent = `${sceneData.name} - Mira un cubo por 3 segundos para teleportarte`;
+            }
             
             const loader = new THREE.TextureLoader();
             loader.load(sceneData.image, function(texture) {
                 texture.encoding = THREE.sRGBEncoding;
                 texture.flipY = false;
                 
-                // MEJORA PARA IMAGEN NÍTIDA: Mejor configuración de textura
-                texture.generateMipmaps = true;
-                texture.minFilter = THREE.LinearMipmapLinearFilter;
+                // MEJORA PARA IMAGEN NÍTIDA Y SIN LAGASOS: Configuración optimizada
+                texture.generateMipmaps = !isMobile; // Sin mipmaps en móviles
+                texture.minFilter = isMobile ? THREE.LinearFilter : THREE.LinearMipmapLinearFilter;
                 texture.magFilter = THREE.LinearFilter;
+                texture.format = THREE.RGBFormat; // Menos memoria
                 
                 sphere.material.map = texture;
                 sphere.material.needsUpdate = true;
@@ -534,11 +668,12 @@
         function checkGaze() {
             if (teleportCubes.length === 0) return;
             
-            // Crear ray desde el centro de la cámara
+            // ARREGLO VR: Usar posición central de la cámara para el raycaster, no desplazada
+            const cameraPosition = new THREE.Vector3(0, 0, 0); // Siempre desde el centro
             const direction = new THREE.Vector3(0, 0, -1);
             direction.applyQuaternion(camera.quaternion);
             
-            raycaster.set(camera.position, direction);
+            raycaster.set(cameraPosition, direction);
             
             // Verificar intersección con cubos
             const intersects = raycaster.intersectObjects(teleportCubes);
@@ -563,7 +698,9 @@
                     }
                     
                     // Mostrar progreso de mirada
-                    if (gazeProgress) {
+                    if (vrMode && gazeProgress3D) {
+                        gazeProgress3D.visible = true;
+                    } else if (gazeProgress) {
                         gazeProgress.classList.add('active');
                     }
                 }
@@ -593,7 +730,9 @@
             gazedCube = null;
             gazeStartTime = 0;
             
-            if (gazeProgress) {
+            if (vrMode && gazeProgress3D) {
+                gazeProgress3D.visible = false;
+            } else if (gazeProgress) {
                 gazeProgress.classList.remove('active');
             }
         }
@@ -793,6 +932,12 @@
         function setupEvents() {
             window.addEventListener('resize', onWindowResize);
             
+            // NUEVO: Detectar cambios de pantalla completa
+            document.addEventListener('fullscreenchange', onFullscreenChange);
+            document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+            document.addEventListener('mozfullscreenchange', onFullscreenChange);
+            document.addEventListener('MSFullscreenChange', onFullscreenChange);
+            
             if (isMobile) {
                 document.addEventListener('touchstart', function(e) {
                     if (e.touches.length > 1) {
@@ -838,16 +983,21 @@
             // Animar cubos de teleportación
             teleportCubes.forEach(cube => {
                 if (cube && cube.rotation) {
+                    cube.rotation.x += 0.01;
                     cube.rotation.y += 0.01;
                 }
             });
             
-            // Verificar mirada hacia cubos
+            // NUEVO: Actualizar crosshair 3D en VR
+            updateCrosshair3D();
+            
+            // IMPORTANTE: Verificar mirada ANTES del renderizado para mantener consistencia
             checkGaze();
             
-            // ARREGLO GIROSCOPIO: Aplicar rotaciones suavemente
-            rotationY += (targetRotationY - rotationY) * 0.1;
-            rotationX += (targetRotationX - rotationX) * 0.1;
+            // ARREGLO GIROSCOPIO: Aplicar rotaciones MÁS suavemente para evitar lagasos
+            const smoothFactor = isMobile ? 0.05 : 0.1; // Más suave en móviles
+            rotationY += (targetRotationY - rotationY) * smoothFactor;
+            rotationX += (targetRotationX - rotationX) * smoothFactor;
             camera.rotation.set(0, rotationY, 0);
             
             // Renderizado VR o normal
@@ -863,6 +1013,9 @@
             const height = window.innerHeight;
             const eyeWidth = width / 2;
             
+            // Guardar posición original de la cámara
+            const originalCameraPosition = camera.position.x;
+            
             // Configurar para ojo izquierdo
             renderer.setViewport(0, 0, eyeWidth, height);
             renderer.setScissor(0, 0, eyeWidth, height);
@@ -875,8 +1028,8 @@
             camera.position.x = 0.5;
             renderer.render(scene, camera);
             
-            // Restaurar posición de cámara
-            camera.position.x = 0;
+            // IMPORTANTE: Restaurar posición original EXACTA
+            camera.position.x = originalCameraPosition;
         }
         
         function onWindowResize() {
@@ -884,8 +1037,9 @@
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
             
-            // ARREGLO IMAGEN BORROSA: Actualizar pixelRatio al redimensionar
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            // ARREGLO IMAGEN BORROSA Y LAGASOS: Actualizar pixelRatio optimizado
+            const newPixelRatio = isMobile ? Math.min(window.devicePixelRatio, 1.5) : Math.min(window.devicePixelRatio, 2);
+            renderer.setPixelRatio(newPixelRatio);
         }
         
         // Inicializar cuando se cargue la página
