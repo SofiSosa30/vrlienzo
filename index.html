@@ -341,14 +341,18 @@
             camera = new THREE.PerspectiveCamera(fov, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.set(0, 0, 0);
             
-            // MEJORA PARA IMAGEN NÍTIDA: Configurar renderer con pixelRatio optimizado
+            // MEJORA PARA IMAGEN NÍTIDA: Configurar renderer optimizado para móviles
             renderer = new THREE.WebGLRenderer({ 
-                antialias: true,
-                powerPreference: "high-performance"
+                antialias: !isMobile, // Sin antialiasing en móviles para mejor performance
+                powerPreference: "high-performance",
+                alpha: false,
+                premultipliedAlpha: false,
+                preserveDrawingBuffer: false
             });
             
-            // ARREGLO IMAGEN BORROSA: Configurar pixelRatio correctamente
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            // ARREGLO IMAGEN BORROSA Y LAGASOS: Configurar pixelRatio y rendimiento
+            const pixelRatio = isMobile ? Math.min(window.devicePixelRatio, 1.5) : Math.min(window.devicePixelRatio, 2);
+            renderer.setPixelRatio(pixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setClearColor(0x000000);
             renderer.outputEncoding = THREE.sRGBEncoding;
@@ -834,7 +838,6 @@
             // Animar cubos de teleportación
             teleportCubes.forEach(cube => {
                 if (cube && cube.rotation) {
-                    cube.rotation.x += 0.01;
                     cube.rotation.y += 0.01;
                 }
             });
